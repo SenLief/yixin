@@ -9,13 +9,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: android-${{ github.ref }}
-
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      release_tag: ${{ steps.apk.outputs.release_tag }}
+    env:
+      ORG_GRADLE_PROJECT_ciBuildNumber: ${{ github.run_number }}
+      ORG_GRADLE_PROJECT_ciBetaBuild: ${{ github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,18 +33,24 @@ jobs:
       - name: Test and build
         run: ./gradlew --no-daemon :core:jvmTest :app:lintDebug :app:assembleRelease
       - name: Build Beta debug APK
-        if: github.ref_type == 'tag' && contains(github.ref_name, '-beta.')
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || contains(github.ref_name, '-beta.'))
         run: ./gradlew --no-daemon :app:assembleDebug
       - name: Prepare and verify APK
-        if: github.ref_type == 'tag'
+        id: apk
+        if: github.event_name == 'push'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: bash scripts/sign-apk.sh "$GITHUB_REF_NAME"
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            bash scripts/sign-apk.sh "$GITHUB_REF_NAME"
+          else
+            bash scripts/sign-apk.sh
+          fi
       - uses: actions/upload-artifact@v7
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push'
         with:
           name: android-release-apk
           path: app/build/release-artifacts/*.apk
@@ -51,7 +59,7 @@ jobs:
           retention-days: 7
 
   release:
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && needs.build.outputs.release_tag != ''
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -66,10 +74,16 @@ jobs:
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          release_options=(--verify-tag --generate-notes --title "一心 Android $version")
-          if [[ "$GITHUB_REF_NAME" == *-beta.* ]]; then
+          version="${RELEASE_TAG#v}"
+          release_options=(--generate-notes --title "一心 Android $version")
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            release_options+=(--verify-tag)
+          else
+            release_options+=(--target "$GITHUB_SHA")
+          fi
+          if [[ "$GITHUB_REF_TYPE" != tag || "$RELEASE_TAG" == *-beta.* ]]; then
             release_options+=(--prerelease)
           fi
-          gh release create "$GITHUB_REF_NAME" release/*.apk "${release_options[@]}"
+          gh release create "$RELEASE_TAG" release/*.apk "${release_options[@]}"

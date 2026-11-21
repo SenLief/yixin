@@ -4,6 +4,10 @@ plugins {
     kotlin("plugin.compose")
 }
 
+val baseVersionName = "0.0.2-beta.1"
+val ciBuildNumber = providers.gradleProperty("ciBuildNumber").map(String::toInt).orNull
+val isCiBetaBuild = providers.gradleProperty("ciBetaBuild").map(String::toBoolean).getOrElse(false)
+
 android {
     namespace = "cn.yixin.todo"
     compileSdk = 35
@@ -11,8 +15,8 @@ android {
         applicationId = "cn.yixin.todo"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.0.2-beta.1"
+        versionCode = ciBuildNumber?.let { 1000 + it } ?: 4
+        versionName = if (isCiBetaBuild && ciBuildNumber != null) "$baseVersionName-build.$ciBuildNumber" else baseVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }

@@ -50,6 +50,12 @@ Room 和界面测试会写入测试数据，请使用专用模拟器或测试设
 ./gradlew :data:connectedDebugAndroidTest :app:connectedDebugAndroidTest
 ```
 
+### CI 构建
+
+每次推送 `main` 都会生成带构建编号的 Beta APK，例如 `0.0.2-beta.1-build.8`，并发布到 GitHub Releases 的预发行区。Android 内部的 `versionCode` 随 Actions 构建编号递增。
+
+覆盖安装还要求签名一致。通过 Actions Secrets 配置并沿用同一份发布密钥，即可在后续版本间覆盖安装。签名 Secrets 为空时发布的 `-debug.apk` 用于安装测试。
+
 ### 模块结构
 
 - [`app`](app/) 包含 Compose 界面、导航和 Android 系统集成。

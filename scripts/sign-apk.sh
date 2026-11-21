@@ -4,28 +4,37 @@ set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 
 tag=${1:-}
-if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[1-9][0-9]*)?$ ]]; then
-    echo 'Usage: bash scripts/sign-apk.sh vX.Y.Z or vX.Y.Z-beta.N' >&2
+if [[ -n "$tag" && ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[1-9][0-9]*)?$ ]]; then
+    echo 'Usage: bash scripts/sign-apk.sh [vX.Y.Z or vX.Y.Z-beta.N]' >&2
     exit 1
 fi
 
 build_tools="${ANDROID_HOME:?Set ANDROID_HOME}/build-tools/35.0.0"
 apk=app/build/outputs/apk/release/app-release-unsigned.apk
 debug_beta=false
-if [[ "$tag" == *-beta.* && -z "${ANDROID_KEYSTORE_BASE64:-}" &&
+if [[ ( -z "$tag" || "$tag" == *-beta.* ) && -z "${ANDROID_KEYSTORE_BASE64:-}" &&
     -z "${ANDROID_KEYSTORE_PASSWORD:-}" && -z "${ANDROID_KEY_ALIAS:-}" && -z "${ANDROID_KEY_PASSWORD:-}" ]]; then
     debug_beta=true
     apk=app/build/outputs/apk/debug/app-debug.apk
 fi
 badging=$("$build_tools/aapt2" dump badging "$apk")
 version=$(sed -n "s/^package: .*versionName='\([^']*\)'.*/\1/p" <<< "$badging")
-if [[ "$tag" != "v$version" ]]; then
+if [[ -z "$tag" ]]; then
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[1-9][0-9]*)?-build\.[1-9][0-9]*$ ]]; then
+        printf 'Expected an APK versionName with a CI build number, got %s\n' "$version" >&2
+        exit 1
+    fi
+    tag="v$version"
+elif [[ "$tag" != "v$version" ]]; then
     printf 'Tag %s does not match APK versionName %s\n' "$tag" "$version" >&2
     exit 1
 fi
 
 output_dir=app/build/release-artifacts
 mkdir -p "$output_dir"
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'release_tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+fi
 if [[ "$debug_beta" == true ]]; then
     echo 'No signing secrets configured. Preparing the Beta debug APK.'
     "$build_tools/apksigner" verify --verbose "$apk"
