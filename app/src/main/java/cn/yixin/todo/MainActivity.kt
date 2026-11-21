@@ -16,9 +16,12 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
     private val model: YixinViewModel by viewModels()
-    private val screenOff = object : BroadcastReceiver() {
+    private val systemChanges = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == Intent.ACTION_SCREEN_OFF) model.background()
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> model.background()
+                Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> model.refreshToday()
+            }
         }
     }
 
@@ -27,7 +30,11 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         ContextCompat.registerReceiver(
-            this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_EXPORTED,
+            this, systemChanges, IntentFilter(Intent.ACTION_SCREEN_OFF).apply {
+                addAction(Intent.ACTION_DATE_CHANGED)
+                addAction(Intent.ACTION_TIME_CHANGED)
+                addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            }, ContextCompat.RECEIVER_EXPORTED,
         )
         setContent { YixinApp(model, window, ::setFocusOrientation) }
     }
@@ -62,7 +69,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        unregisterReceiver(screenOff)
+        unregisterReceiver(systemChanges)
         super.onDestroy()
     }
 }

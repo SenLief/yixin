@@ -29,12 +29,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.yixin.core.Category
 import cn.yixin.core.DeckState
 import cn.yixin.core.HomeView
+import cn.yixin.core.Sort
 import cn.yixin.core.Task
+import cn.yixin.core.cardsFor
+import cn.yixin.core.currentCard
 import cn.yixin.core.ordered
-import java.time.LocalDate
 
 @Composable
 internal fun rememberOrderedTasks(deck: DeckState): List<Task> =
@@ -43,11 +46,17 @@ internal fun rememberOrderedTasks(deck: DeckState): List<Task> =
 @Composable
 internal fun Home(deck: DeckState, model: YixinViewModel) {
     val tasks = rememberOrderedTasks(deck)
-    val selected = remember(tasks, deck.currentId, deck.pinnedId) { deck.current(tasks) }
+    val today by model.today.collectAsStateWithLifecycle()
+    val todayOnly = deck.preferences.sortMode == Sort.today
+    val cards = remember(tasks, today, todayOnly) { deck.cardsFor(today, tasks) }
+    val selected = remember(cards, deck.currentId, deck.pinnedId) { deck.currentCard(cards) }
     val archived = deck.tasks.size - tasks.size
     val calendar = deck.preferences.homeView == HomeView.calendar
-    var calendarDate by rememberSaveable { mutableStateOf<String?>(LocalDate.now().toString()) }
-    val openEditor = { model.open(Screen.Editor(null, defaultDueDate = calendarDate.takeIf { calendar })) }
+    var calendarDate by rememberSaveable { mutableStateOf<String?>(today) }
+    val openEditor = {
+        val defaultDate = if (todayOnly) today else calendarDate.takeIf { calendar }
+        model.open(Screen.Editor(null, defaultDueDate = defaultDate))
+    }
     BoxWithConstraints(
         Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
         contentAlignment = Alignment.TopCenter,
@@ -93,14 +102,16 @@ internal fun Home(deck: DeckState, model: YixinViewModel) {
                 HomeHeading(calendar, showEyebrow = !short)
                 Spacer(Modifier.height(if (short) 16.dp else 21.dp))
                 if (calendar) {
-                    CalendarView(tasks, deck, calendarDate, { calendarDate = it }, openEditor) { task ->
+                    val addForSelectedDate = { model.open(Screen.Editor(null, defaultDueDate = calendarDate)) }
+                    CalendarView(tasks, deck, calendarDate, { calendarDate = it }, addForSelectedDate) { task ->
                         model.select(task.id, details = true)
                     }
                 } else if (selected == null) {
-                    EmptyDeck(cardHeight, archived > 0, openEditor)
+                    val unpin = deck.pinnedId?.takeIf { todayOnly }?.let { id -> { model.pin(id) } }
+                    EmptyDeck(cardHeight, archived > 0, todayOnly, openEditor, unpin)
                 } else {
                     CardDeck(
-                        selected, tasks, deck, model, cardHeight, compactCard,
+                        selected, cards, deck, model, cardHeight, compactCard,
                         modifier = Modifier.widthIn(max = cardWidth).fillMaxWidth(),
                     )
                 }
@@ -172,7 +183,7 @@ private fun HomeHeading(calendar: Boolean, showEyebrow: Boolean) {
 }
 
 @Composable
-private fun EmptyDeck(cardHeight: Dp, hasArchive: Boolean, add: () -> Unit) {
+private fun EmptyDeck(cardHeight: Dp, hasArchive: Boolean, todayOnly: Boolean, add: () -> Unit, unpin: (() -> Unit)?) {
     val c = LocalYixinColors.current
     Column(
         Modifier.heightIn(min = cardHeight).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -183,15 +194,29 @@ private fun EmptyDeck(cardHeight: Dp, hasArchive: Boolean, add: () -> Unit) {
             HomeGlyph(Glyph.Stack, c.accent, Modifier.size(26.dp))
         }
         Text(
-            if (hasArchive) "此刻，轻一点。" else "先放下一件小事。",
+            when {
+                unpin != null -> "置顶任务不在今日安排中"
+                todayOnly -> "今天没有待办"
+                hasArchive -> "此刻，轻一点。"
+                else -> "先放下一件小事。"
+            },
             style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Serif,
             color = c.ink, textAlign = TextAlign.Center,
         )
-        Text(
-            if (hasArchive) "这叠卡片都收好了。歇一下，也很好。" else "不用规划一整天。从眼前的一小步开始。",
-            color = c.muted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
-        )
-        Button(onClick = add) { Text(if (hasArchive) "记下新的一件" else "放入第一张卡片") }
+        if (!todayOnly) {
+            Text(
+                if (hasArchive) "这叠卡片都收好了。歇一下，也很好。" else "不用规划一整天。从眼前的一小步开始。",
+                color = c.muted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+            )
+        }
+        Button(onClick = unpin ?: add) {
+            Text(when {
+                unpin != null -> "取消置顶"
+                todayOnly -> "安排今天的任务"
+                hasArchive -> "记下新的一件"
+                else -> "放入第一张卡片"
+            })
+        }
     }
 }
 

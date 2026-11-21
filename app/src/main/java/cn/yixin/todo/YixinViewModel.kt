@@ -14,15 +14,19 @@ import cn.yixin.core.Completion
 import cn.yixin.core.DeckState
 import cn.yixin.core.Draft
 import cn.yixin.core.FocusProgress
+import cn.yixin.core.HomeView
 import cn.yixin.core.ImportOptions
 import cn.yixin.core.ImportPreview
 import cn.yixin.core.Preferences
 import cn.yixin.core.Repository
 import cn.yixin.core.Ritual
 import cn.yixin.core.RunningFocus
+import cn.yixin.core.Sort
 import cn.yixin.core.add
 import cn.yixin.core.addCategory
+import cn.yixin.core.cardsFor
 import cn.yixin.core.complete
+import cn.yixin.core.currentCard
 import cn.yixin.core.decodeBackup
 import cn.yixin.core.deleteCategory
 import cn.yixin.core.draw
@@ -80,6 +84,8 @@ class YixinViewModel(app: Application) : AndroidViewModel(app) {
     val state = repo.state
     private val pages = MutableStateFlow<List<Screen>>(listOf(Screen.Home))
     val screens = pages.asStateFlow()
+    private val localDate = MutableStateFlow(LocalDate.now().toString())
+    val today = localDate.asStateFlow()
     private val active = MutableStateFlow<RunningFocus?>(null)
     val running = active.asStateFlow()
     private val bootError = MutableStateFlow<String?>(null)
@@ -129,7 +135,12 @@ class YixinViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun foreground() { foreground = true }
+    fun refreshToday() { localDate.value = LocalDate.now().toString() }
+
+    fun foreground() {
+        foreground = true
+        refreshToday()
+    }
 
     fun background() {
         foreground = false
@@ -168,15 +179,20 @@ class YixinViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun showCurrent() = dispatch {
-        current().current()?.let { push(Screen.Detail(it.id)) }
+        if (pages.value.last() != Screen.Home) return@dispatch
+        val deck = current()
+        val card = deck.currentCard(deck.cardsFor(today.value)) ?: return@dispatch
+        if (deck.currentId != card.id) repo.change { it.select(card.id) }
+        push(Screen.Detail(card.id))
     }
 
     fun navigateFrom(id: String, direction: Int, onSettled: (Boolean) -> Unit = {}) = dispatch {
         var switched = false
         try {
             if (pages.value.last() != Screen.Home) return@dispatch
-            val deck = repo.change { it.navigate(direction, fromId = id) }
-            switched = deck.current()?.id != id
+            val previousId = current().currentId
+            val deck = repo.change { it.navigate(direction, fromId = id, today = today.value) }
+            switched = deck.currentId != previousId
         } finally {
             onSettled(switched)
         }
@@ -201,7 +217,7 @@ class YixinViewModel(app: Application) : AndroidViewModel(app) {
         val before = current()
         if (before.task(id)?.let { it.completedAt == null } != true) return@dispatch
         val at = System.currentTimeMillis()
-        repo.change { it.complete(id, at) }
+        repo.change { it.complete(id, at, today.value) }
         if (active.value?.base?.taskId == id) active.value = null
         pages.value = pages.value.dropLastWhile {
             (it is Screen.Focus && it.id == id) || (it is Screen.Detail && it.id == id)
@@ -211,8 +227,13 @@ class YixinViewModel(app: Application) : AndroidViewModel(app) {
 
     fun restore(id: String, undo: Completion? = null) = change { it.restore(id, System.currentTimeMillis(), undo) }
 
-    fun preferences(transform: (Preferences) -> Preferences) =
-        change { deck -> deck.copy(currentId = deck.current()?.id, preferences = transform(deck.preferences)) }
+    fun preferences(transform: (Preferences) -> Preferences) = change { deck ->
+        val preferences = transform(deck.preferences)
+        val leavingTodayCards = deck.preferences.sortMode == Sort.today && preferences.sortMode != Sort.today &&
+            deck.preferences.homeView == HomeView.cards
+        val visibleCard = if (leavingTodayCards) deck.currentCard(deck.cardsFor(today.value)) else null
+        deck.copy(currentId = (visibleCard ?: deck.current())?.id, preferences = preferences)
+    }
 
     fun shuffle() = change {
         it.copy(currentId = it.current()?.id, shuffleSeed = Random.nextLong(0, 4_294_967_296L))
@@ -227,7 +248,8 @@ class YixinViewModel(app: Application) : AndroidViewModel(app) {
 
     fun draw() = dispatch {
         val deck = current()
-        val ids = withContext(Dispatchers.Default) { deck.draw(Random.Default) }
+        val date = today.value
+        val ids = withContext(Dispatchers.Default) { deck.draw(Random.Default, date) }
         if (ids.isEmpty()) return@dispatch
         val screen = Screen.Draw(ids, ++deal)
         if (pages.value.last() is Screen.Draw) replaceTop(screen)

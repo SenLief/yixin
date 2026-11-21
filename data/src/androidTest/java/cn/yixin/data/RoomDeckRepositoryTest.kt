@@ -9,6 +9,7 @@ import cn.yixin.core.Draft
 import cn.yixin.core.FocusMode
 import cn.yixin.core.FocusProgress
 import cn.yixin.core.Mood
+import cn.yixin.core.Sort
 import cn.yixin.core.TagColor
 import cn.yixin.core.add
 import cn.yixin.core.addCategory
@@ -44,7 +45,7 @@ class RoomDeckRepositoryTest {
                         .add("c", Draft("专注"), 3)
                         .complete("b", 4).move("c", -1).select("c").togglePin("c")
                         .deleteCategory("work").saveProgress(FocusProgress("c", FocusMode.countup, 1_500_000, 3_440))
-                        .copy(shuffleSeed = 77, preferences = it.preferences.copy(theme = Mood.night))
+                        .copy(shuffleSeed = 77, preferences = it.preferences.copy(theme = Mood.night, sortMode = Sort.today))
                 }
             }
             RoomDeckRepository(context, name) { "new-id-must-not-be-used" }.use { reopened ->
@@ -57,6 +58,7 @@ class RoomDeckRepositoryTest {
                 assertEquals("c", data.pinnedId)
                 assertEquals(77L, data.shuffleSeed)
                 assertEquals(Mood.night, data.preferences.theme)
+                assertEquals(Sort.today, data.preferences.sortMode)
                 assertNull(data.activeCategory("work"))
                 assertEquals(3_440L, data.progress.single().elapsedMs)
             }

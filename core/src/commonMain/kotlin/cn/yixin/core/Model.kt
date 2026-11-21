@@ -7,7 +7,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 enum class Sort(val label: String) {
-    manual("我的顺序"), due("日期优先"), created("先记先做"), shortest("轻事先做"), random("随心一叠")
+    manual("我的顺序"), today("今日安排"), due("日期优先"), created("先记先做"),
+    shortest("轻事先做"), random("随心一叠")
 }
 
 @Serializable

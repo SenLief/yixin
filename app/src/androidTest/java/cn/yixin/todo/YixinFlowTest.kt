@@ -24,6 +24,8 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -33,6 +35,7 @@ import cn.yixin.core.DeckState
 import cn.yixin.core.Draft
 import cn.yixin.core.FocusMode
 import cn.yixin.core.HomeView
+import cn.yixin.core.Sort
 import cn.yixin.core.add
 import cn.yixin.core.decodeBackup
 import cn.yixin.core.encodeBackup
@@ -274,6 +277,67 @@ class YixinFlowTest {
         awaitHome()
         await(second)
         assertEquals(secondId, model.state.value?.currentId)
+    }
+
+    @Test fun todayOrderSwipesBetweenTodaysCardsAndDefaultsNewTasksToToday() {
+        val model = model()
+        await("卡片叠")
+        val previous = checkNotNull(model.state.value).preferences
+        val today = LocalDate.parse(model.today.value)
+        val token = UUID.randomUUID().toString().take(8)
+        val first = "今天第一件 $token"
+        val second = "今天第二件 $token"
+        val upcoming = "明天到期 $token"
+        val newTitle = "刚刚安排 $token"
+
+        fun addTask(title: String, date: LocalDate): String {
+            val editor = Screen.Editor(null, date.toString())
+            ui.runOnIdle { model.open(editor) }
+            ui.waitUntil(8_000) { model.screens.value.last() == editor }
+            ui.runOnIdle { model.save(editor, Draft(title, dueDate = date.toString())) }
+            awaitHome()
+            return checkNotNull(model.state.value?.tasks?.single { it.title == title }).id
+        }
+
+        try {
+            val firstId = addTask(first, today)
+            addTask(upcoming, today.plusDays(1))
+            val secondId = addTask(second, today)
+            ui.runOnIdle {
+                model.preferences { it.copy(sortMode = Sort.manual, homeView = HomeView.cards) }
+                model.select(firstId)
+            }
+            await(first)
+            ui.onNodeWithContentDescription("设置").performClick()
+            await("任务排序")
+            ui.onNodeWithText("我的顺序").performScrollTo().performClick()
+            click("今日安排")
+            ui.waitUntil(8_000) { model.state.value?.preferences?.sortMode == Sort.today }
+            ui.onNodeWithContentDescription("返回").performClick()
+            awaitHome()
+
+            ui.onNodeWithTag("deck-gesture-area").performScrollTo().performTouchInput { swipeLeft() }
+            ui.waitUntil(8_000) { model.state.value?.currentId == secondId }
+            await(second)
+            ui.onNodeWithTag("deck-gesture-area").performTouchInput { swipeRight() }
+            ui.waitUntil(8_000) { model.state.value?.currentId == firstId }
+            await(first)
+
+            openNewTask()
+            ui.onNodeWithText(today.toString(), useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+            ui.onNodeWithContentDescription("这一件，想做什么？").performTextInput(newTitle)
+            submitNew()
+            assertEquals(today.toString(), model.state.value?.tasks?.single { it.title == newTitle }?.dueDate)
+
+            ui.onNodeWithText("卡片叠").performScrollTo().performClick()
+            await("完成归档")
+            ui.onNodeWithText(upcoming).performScrollTo().assertIsDisplayed()
+            ui.onNodeWithContentDescription("返回").performClick()
+            awaitHome()
+        } finally {
+            ui.runOnIdle { model.preferences { previous } }
+            ui.waitUntil(8_000) { model.state.value?.preferences == previous }
+        }
     }
 
     @Test fun drawDealsAndRevealsBeforeHighlightingTheChosenCardAndStartingFocus() {

@@ -21,7 +21,7 @@ fun legacyRandomKey(id: String, seed: Long): UInt {
 fun DeckState.ordered(): List<Task> {
     val active = tasks.filter { it.completedAt == null }
     val chosen = when (preferences.sortMode) {
-        Sort.manual -> {
+        Sort.manual, Sort.today -> {
             val byId = active.associateBy(Task::id)
             return buildList(active.size) {
                 pinnedId?.let(byId::get)?.let(::add)
@@ -40,6 +40,14 @@ fun DeckState.ordered(): List<Task> {
     return active.sortedWith(
         compareByDescending<Task> { it.id == pinnedId }.then(chosen).thenBy { position.getValue(it.id) },
     )
+}
+
+fun DeckState.cardsFor(today: String, activeOrder: List<Task> = ordered()): List<Task> =
+    if (preferences.sortMode == Sort.today) activeOrder.filter { it.dueDate == today } else activeOrder
+
+fun DeckState.currentCard(cards: List<Task>): Task? {
+    val selectedId = pinnedId ?: currentId
+    return cards.firstOrNull { it.id == selectedId } ?: cards.firstOrNull().takeIf { pinnedId == null }
 }
 
 sealed interface CategoryFilter {
@@ -77,9 +85,9 @@ fun DeckState.edit(id: String, draft: Draft, at: Long): DeckState {
 
 fun DeckState.select(id: String) = if (canSelect(id)) copy(currentId = id) else this
 
-fun DeckState.navigate(direction: Int, fromId: String? = null): DeckState {
+fun DeckState.navigate(direction: Int, fromId: String? = null, today: String? = null): DeckState {
     if (pinnedId != null) return this
-    val deck = ordered()
+    val deck = today?.let { cardsFor(it) } ?: ordered()
     if (deck.size < 2) return this
     val index = deck.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
     if (fromId != null && deck[index].id != fromId) return this
@@ -92,12 +100,14 @@ fun DeckState.togglePin(id: String): DeckState = when {
     else -> copy(currentId = id, pinnedId = id)
 }
 
-fun DeckState.complete(id: String, at: Long): DeckState {
-    val deck = ordered()
+fun DeckState.complete(id: String, at: Long, today: String? = null): DeckState {
+    val todayOrder = today?.takeIf { preferences.sortMode == Sort.today && task(id)?.dueDate == it }
+        ?.let { cardsFor(it) }
+    val deck = todayOrder ?: ordered()
     val index = deck.indexOfFirst { it.id == id }
     if (index < 0) return this
     val next = if (deck.size > 1) deck[(index + 1) % deck.size].id else null
-    val currentTaskId = current(deck)?.id
+    val currentTaskId = todayOrder?.let { currentCard(it)?.id } ?: current(deck)?.id
     return copy(
         tasks = tasks.map { if (it.id == id) it.copy(completedAt = at, updatedAt = at) else it },
         progress = progress.filterNot { it.taskId == id },
@@ -142,8 +152,8 @@ fun DeckState.addCategory(category: Category): DeckState {
 fun DeckState.deleteCategory(id: String) =
     copy(categories = categories.map { if (it.id == id) it.copy(deleted = true) else it })
 
-fun DeckState.draw(random: Random): List<String> =
-    if (pinnedId == null) ordered().shuffled(random).take(3).map { it.id } else emptyList()
+fun DeckState.draw(random: Random, today: String? = null): List<String> =
+    if (pinnedId == null) (today?.let { cardsFor(it) } ?: ordered()).shuffled(random).take(3).map { it.id } else emptyList()
 
 fun DeckState.saveProgress(progress: FocusProgress): DeckState {
     if (task(progress.taskId)?.let { it.completedAt == null } != true) return this

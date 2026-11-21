@@ -77,6 +77,35 @@ class DeckTest {
         assertEquals(3, shuffled.draw(Random(6)).distinct().size)
     }
 
+    @Test fun todayCardsIncludeOnlyPendingTasksDueOnTheLocalDate() {
+        val today = "2026-12-31"
+        val tomorrow = "2027-01-01"
+        val state = triple()
+            .add("overdue", Draft("昨天", dueDate = "2026-12-30"), 4)
+            .add("d", Draft("今天的第二件", dueDate = today), 5)
+            .add("archived", Draft("今天已完成", dueDate = today), 6)
+            .complete("archived", 7)
+            .using(Sort.today)
+        val cards = state.cardsFor(today)
+        assertEquals(listOf("c", "d"), cards.ids())
+        assertEquals(listOf("a", "b", "c", "overdue", "d"), state.ordered().ids())
+        assertEquals("c", state.currentCard(cards)?.id)
+        assertEquals("d", state.navigate(1, fromId = "c", today = today).currentId)
+        assertEquals("d", state.navigate(-1, fromId = "c", today = today).currentId)
+        assertEquals(state, state.navigate(1, fromId = "a", today = today))
+        assertEquals(setOf("c", "d"), state.draw(Random(6), today).toSet())
+        assertEquals("d", state.complete("c", 8, today).currentId)
+        assertEquals(listOf("a"), state.cardsFor(tomorrow).ids())
+        assertTrue(state.cardsFor("2027-01-02").isEmpty())
+        assertEquals(state.ordered(), state.using(Sort.manual).cardsFor(today))
+        assertEquals(Sort.today, decodeBackup(encodeBackup(state)).data.preferences.sortMode)
+
+        val pinned = state.togglePin("a")
+        assertNull(pinned.currentCard(pinned.cardsFor(today)))
+        assertEquals(pinned, pinned.navigate(1, fromId = "c", today = today))
+        assertEquals("c", pinned.togglePin("a").currentCard(cards)?.id)
+    }
+
     @Test fun categoryTombstonesKeepTasksAndDoNotChangeOrderOrPin() {
         val state = triple().select("c").togglePin("c")
         val filtered = state.ordered().filter { state.matches(it, CategoryFilter.Tagged("work")) }
