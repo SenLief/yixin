@@ -1,6 +1,7 @@
 package cn.yixin.todo
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -29,6 +30,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -66,6 +68,8 @@ private fun TaskPanel(
     title: String,
     dismiss: () -> Unit,
     tools: @Composable RowScope.() -> Unit,
+    alignTop: Boolean = false,
+    reduceMotion: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val c = LocalYixinColors.current
@@ -79,19 +83,31 @@ private fun TaskPanel(
     ) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect { window?.setDimAmount(0f) }
+        var visible by remember { mutableStateOf(!alignTop || reduceMotion) }
+        LaunchedEffect(Unit) { visible = true }
+        val entrance by animateFloatAsState(
+            targetValue = if (visible) 1f else 0f,
+            animationSpec = if (reduceMotion) snap() else tween(220, easing = FastOutSlowInEasing),
+            label = "task editor entrance",
+        )
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Box(
-                Modifier.matchParentSize().background(rgb(0x101B17).copy(alpha = 0.4f))
+                Modifier.matchParentSize().graphicsLayer { alpha = entrance }
+                    .background(rgb(0x101B17).copy(alpha = 0.4f))
                     .clickable(interactionSource = null, indication = null, onClick = dismiss)
                     .clearAndSetSemantics { },
             )
             BoxWithConstraints(
-                Modifier.windowInsetsPadding(WindowInsets.safeDrawing).imePadding()
-                    .padding(horizontal = 16.dp, vertical = 15.dp).fillMaxSize(),
-                contentAlignment = Alignment.Center,
+                Modifier.safeDrawingPadding().padding(horizontal = 16.dp, vertical = 15.dp).fillMaxSize(),
+                // Keyboard insets change the scrollable height, while the editor keeps its top edge.
+                contentAlignment = if (alignTop) Alignment.TopCenter else Alignment.Center,
             ) {
                 Surface(
-                    modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth().heightIn(max = maxHeight),
+                    modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth().heightIn(max = maxHeight)
+                        .graphicsLayer {
+                            alpha = entrance
+                            translationY = -10.dp.toPx() * (1f - entrance)
+                        },
                     color = c.background,
                     shape = RoundedCornerShape(21.dp),
                     border = BorderStroke(1.dp, c.line),
@@ -231,6 +247,8 @@ internal fun TaskEditor(screen: Screen.Editor, deck: DeckState, model: YixinView
         if (task == null) "新安排" else "编辑这一件",
         model::back,
         tools = { PanelIcon(Glyph.Close, "关闭", onClick = model::back) },
+        alignTop = true,
+        reduceMotion = deck.preferences.reduceMotion,
     ) {
         val focus = LocalFocusManager.current
         val keyboard = LocalSoftwareKeyboardController.current
