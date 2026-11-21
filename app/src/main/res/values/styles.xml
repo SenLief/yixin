@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">一心</string>
+    <style name="Theme.Yixin" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F1F3ED</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">#466451</item>
+    </style>
+</resources>
